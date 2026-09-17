@@ -1,0 +1,9 @@
+variable "project_name" { type = string }
+variable "environment" { type = string }
+variable "lambda_v2_function_name" { type = string }
+variable "sqs_queue_name" { type = string }
+variable "sqs_dlq_name" { type = string }
+variable "ecs_cluster_name" { type = string }
+variable "ecs_service_name" { type = string }
+variable "cognito_user_pool_id" { type = string }
+variable "phase1_sns_topic_arn" { type = string }

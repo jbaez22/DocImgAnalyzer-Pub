@@ -1,0 +1,190 @@
+name: Phase 2 PR Validation
+
+on:
+  pull_request:
+    branches: [phase2]
+    paths:
+      - 'terraform/phase2/**'
+      - 'backend/v2/**'
+      - 'backend/scanner/**'
+      - 'frontend/**'
+      - '.github/workflows/phase2-*.yml'
+
+concurrency:
+  group: phase2-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  TF_VERSION:     '1.15.6'
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION:   '22'
+  TF_ENV:         'dev'
+
+jobs:
+  # ── Detect changed paths ────────────────────────────────────────────────────
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      terraform: ${{ steps.filter.outputs.terraform }}
+      backend:   ${{ steps.filter.outputs.backend }}
+      scanner:   ${{ steps.filter.outputs.scanner }}
+      frontend:  ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            terraform:
+              - 'terraform/phase2/**'
+            backend:
+              - 'backend/v2/**'
+            scanner:
+              - 'backend/scanner/**'
+            frontend:
+              - 'frontend/**'
+
+  # ── Terraform fmt + validate ────────────────────────────────────────────────
+  terraform-fmt:
+    name: Terraform Format & Validate
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - name: terraform fmt
+        run: terraform fmt -check -recursive terraform/phase2/
+      - name: terraform validate
+        working-directory: terraform/phase2
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+  # ── Terraform plan ──────────────────────────────────────────────────────────
+  terraform-plan:
+    name: Terraform Plan (dev)
+    needs: [changes, terraform-fmt]
+    if: needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          # Read-only role, trusted only for pull_request -- never the broad-write
+          # deploy role. See threat model CRITICAL #1 in
+          # docs/SSAgent/DocImgAnalizer-AWSSecurityAgentThreatModelFindings-V1.md.
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_PLAN }}
+          aws-region: us-east-1
+      - name: terraform init
+        working-directory: terraform/phase2
+        run: terraform init -backend-config=environments/dev/backend.hcl
+      - name: terraform plan
+        id: plan
+        working-directory: terraform/phase2
+        run: terraform plan -var-file=environments/dev/terraform.tfvars -no-color -out=tfplan 2>&1 | tee plan.txt
+      - name: Post plan as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/phase2/plan.txt', 'utf8').slice(0, 60000);
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### Phase 2 Terraform Plan (dev)\n\`\`\`\n${plan}\n\`\`\``
+            });
+
+  # ── Backend v2 lint + test ──────────────────────────────────────────────────
+  backend-v2:
+    name: Backend v2 — Lint & Test
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+      - name: ruff lint
+        run: ruff check backend/v2/
+      - name: ruff format check
+        run: ruff format --check backend/v2/
+      - name: mypy
+        run: mypy backend/v2/ --ignore-missing-imports
+      - name: pytest
+        run: pytest backend/tests/v2/ -v --tb=short
+
+  # ── Scanner container build + Trivy scan ────────────────────────────────────
+  scanner:
+    name: Scanner — Build & Scan
+    needs: changes
+    if: needs.changes.outputs.scanner == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build scanner image
+        run: docker build -t scanner:pr backend/scanner/
+      - name: Trivy scan scanner image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: scanner:pr
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+  # ── Frontend lint + build ───────────────────────────────────────────────────
+  frontend:
+    name: Frontend — Lint & Build
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+  # ── Unified gate ────────────────────────────────────────────────────────────
+  pr-ready:
+    name: PR Ready
+    needs: [terraform-fmt, terraform-plan, backend-v2, scanner, frontend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs passed
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results" | python3 -c "
+          import json, sys
+          needs = json.load(sys.stdin)
+          failed = [k for k, v in needs.items() if v['result'] not in ('success', 'skipped')]
+          if failed:
+              print('Failed jobs:', failed)
+              sys.exit(1)
+          print('All checks passed')
+          "

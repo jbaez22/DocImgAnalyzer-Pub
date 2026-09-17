@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # GitHub Actions used across all workflow files (deploy.yml, pr.yml,
+  # phase2-deploy.yml, phase2-pr.yml, phase3-deploy.yml, phase3-pr.yml)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

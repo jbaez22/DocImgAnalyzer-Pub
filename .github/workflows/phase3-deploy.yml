@@ -1,0 +1,325 @@
+name: Phase 3 Deploy
+
+on:
+  push:
+    branches: [phase3]
+    paths:
+      - 'terraform/phase3/**'
+      - 'backend/v3/**'
+      - 'backend/webhooks/**'
+      - 'backend/rescan/**'
+      - 'frontend/**'
+      - '.github/workflows/phase3-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, prod]
+
+concurrency:
+  group: phase3-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VERSION:     '1.15.6'
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION:   '22'
+
+jobs:
+  # ── Deploy to dev (auto on phase3 push) ────────────────────────────────────
+  deploy-dev:
+    name: Deploy — dev
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
+    runs-on: ubuntu-latest
+    environment: phase3-development
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_PHASE3 }}
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # ── Terraform apply ──────────────────────────────────────────────────
+      - name: terraform init (dev)
+        working-directory: terraform/phase3
+        run: terraform init -backend-config=environments/dev/backend.hcl
+      - name: terraform apply (dev)
+        working-directory: terraform/phase3
+        run: terraform apply -var-file=environments/dev/terraform.tfvars -auto-approve
+
+      # ── Build + deploy Lambda v3 ─────────────────────────────────────────
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Lambda v3 package
+        run: |
+          BUILD=$(mktemp -d)
+          # Install Python deps cross-compiled for Lambda (linux/amd64)
+          # Strip boto3/botocore — provided by the Lambda runtime
+          pip install \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 \
+            --only-binary=:all: \
+            --target "$BUILD" \
+            -r backend/requirements.txt
+          rm -rf "$BUILD/boto3" "$BUILD/botocore" \
+                 "$BUILD/boto3-"*.dist-info "$BUILD/botocore-"*.dist-info
+          # Copy backend packages that Lambda v3 imports
+          cp -r backend/v3     "$BUILD/v3"
+          cp -r backend/app    "$BUILD/app"
+          cp -r backend/v2     "$BUILD/v2"
+          cd "$BUILD" && zip -r "$GITHUB_WORKSPACE/lambda-v3.zip" . -x "*.pyc" -x "*/__pycache__/*"
+
+      - name: Get Lambda v3 function name
+        id: lambda_v3
+        working-directory: terraform/phase3
+        run: echo "name=$(terraform output -raw lambda_v3_function_name)" >> $GITHUB_OUTPUT
+
+      - name: Update Lambda v3 code
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ steps.lambda_v3.outputs.name }}" \
+            --zip-file fileb://lambda-v3.zip \
+            --query 'FunctionArn' --output text
+
+      # ── Build + deploy Stripe webhook Lambda ─────────────────────────────
+      - name: Build Stripe webhook Lambda package
+        run: |
+          BUILD=$(mktemp -d)
+          # Install stripe + boto3 — boto3 included here (not provided by runtime for this lightweight Lambda)
+          pip install \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 \
+            --only-binary=:all: \
+            --target "$BUILD" \
+            stripe==12.2.0 \
+            boto3
+          # Flatten: put stripe_handler.py at the zip root (handler = "stripe_handler.handler")
+          cp backend/webhooks/stripe_handler.py "$BUILD/stripe_handler.py"
+          cd "$BUILD" && zip -r "$GITHUB_WORKSPACE/lambda-webhook.zip" . -x "*.pyc" -x "*/__pycache__/*"
+
+      - name: Get Stripe webhook function name
+        id: lambda_webhook
+        working-directory: terraform/phase3
+        run: echo "name=$(terraform output -raw stripe_webhook_function_name)" >> $GITHUB_OUTPUT
+
+      - name: Update Stripe webhook Lambda code
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ steps.lambda_webhook.outputs.name }}" \
+            --zip-file fileb://lambda-webhook.zip \
+            --query 'FunctionArn' --output text
+
+      # ── Build + deploy re-scan trigger Lambda ────────────────────────────
+      - name: Build rescan trigger Lambda package
+        run: |
+          BUILD=$(mktemp -d)
+          cp backend/rescan/rescan_trigger.py "$BUILD/rescan_trigger.py"
+          cd "$BUILD" && zip -r "$GITHUB_WORKSPACE/lambda-rescan.zip" .
+
+      - name: Get rescan trigger function name
+        id: lambda_rescan
+        working-directory: terraform/phase3
+        run: echo "name=$(terraform output -raw rescan_trigger_function_name)" >> $GITHUB_OUTPUT
+
+      - name: Update rescan trigger Lambda code
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ steps.lambda_rescan.outputs.name }}" \
+            --zip-file fileb://lambda-rescan.zip \
+            --query 'FunctionArn' --output text
+
+      - name: Get Stripe price IDs
+        id: stripe_prices
+        working-directory: terraform/phase3
+        run: |
+          echo "pro=$(terraform output -raw stripe_pro_price_id)" >> $GITHUB_OUTPUT
+          echo "enterprise=$(terraform output -raw stripe_enterprise_price_id)" >> $GITHUB_OUTPUT
+
+      # ── Deploy frontend ──────────────────────────────────────────────────
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+        env:
+          VITE_API_BASE_URL: https://dev-img.craftingnewtech.com
+          VITE_COGNITO_USER_POOL_ID:         ${{ vars.VITE_COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_CLIENT_ID:            ${{ vars.VITE_COGNITO_CLIENT_ID }}
+          VITE_STRIPE_PRO_PRICE_ID:         ${{ steps.stripe_prices.outputs.pro }}
+          VITE_STRIPE_ENTERPRISE_PRICE_ID:  ${{ steps.stripe_prices.outputs.enterprise }}
+
+      - name: Sync frontend to S3
+        run: |
+          BUCKET=$(cd terraform/phase1 && \
+            terraform init -backend-config=environments/dev/backend.hcl -reconfigure > /dev/null 2>&1 && \
+            terraform output -raw frontend_bucket 2>/dev/null) || BUCKET="img-analyzer-dev-frontend"
+          aws s3 sync frontend/dist/ s3://$BUCKET/ --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+          aws s3 cp frontend/dist/index.html s3://$BUCKET/index.html \
+            --cache-control "no-cache,no-store,must-revalidate"
+
+      - name: CloudFront invalidation
+        run: |
+          DIST_ID=$(cd terraform/phase1 && \
+            terraform init -backend-config=environments/dev/backend.hcl -reconfigure > /dev/null 2>&1 && \
+            terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "${{ vars.CF_DIST_ID_DEV }}")
+          aws cloudfront create-invalidation \
+            --distribution-id "$DIST_ID" \
+            --paths "/index.html"
+
+  # ── Deploy to prod (manual approval required) ───────────────────────────────
+  deploy-prod:
+    name: Deploy — prod
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: phase3-production
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_PHASE3_PROD }}
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform init (prod)
+        working-directory: terraform/phase3
+        run: terraform init -backend-config=environments/prod/backend.hcl
+      - name: terraform apply (prod)
+        working-directory: terraform/phase3
+        run: terraform apply -var-file=environments/prod/terraform.tfvars -auto-approve
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Lambda v3 package
+        run: |
+          BUILD=$(mktemp -d)
+          pip install \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 \
+            --only-binary=:all: \
+            --target "$BUILD" \
+            -r backend/requirements.txt
+          rm -rf "$BUILD/boto3" "$BUILD/botocore" \
+                 "$BUILD/boto3-"*.dist-info "$BUILD/botocore-"*.dist-info
+          cp -r backend/v3  "$BUILD/v3"
+          cp -r backend/app "$BUILD/app"
+          cp -r backend/v2  "$BUILD/v2"
+          cd "$BUILD" && zip -r "$GITHUB_WORKSPACE/lambda-v3.zip" . -x "*.pyc" -x "*/__pycache__/*"
+
+      - name: Get Lambda v3 function name
+        id: lambda_v3
+        working-directory: terraform/phase3
+        run: echo "name=$(terraform output -raw lambda_v3_function_name)" >> $GITHUB_OUTPUT
+
+      - name: Update Lambda v3 code
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ steps.lambda_v3.outputs.name }}" \
+            --zip-file fileb://lambda-v3.zip \
+            --query 'FunctionArn' --output text
+
+      - name: Build Stripe webhook Lambda package
+        run: |
+          BUILD=$(mktemp -d)
+          pip install \
+            --platform manylinux2014_x86_64 \
+            --only-binary=:all: \
+            --target "$BUILD" \
+            stripe==12.2.0 boto3
+          cp backend/webhooks/stripe_handler.py "$BUILD/stripe_handler.py"
+          cd "$BUILD" && zip -r "$GITHUB_WORKSPACE/lambda-webhook.zip" . -x "*.pyc" -x "*/__pycache__/*"
+
+      - name: Get Stripe webhook function name
+        id: lambda_webhook
+        working-directory: terraform/phase3
+        run: echo "name=$(terraform output -raw stripe_webhook_function_name)" >> $GITHUB_OUTPUT
+
+      - name: Update Stripe webhook Lambda code
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ steps.lambda_webhook.outputs.name }}" \
+            --zip-file fileb://lambda-webhook.zip \
+            --query 'FunctionArn' --output text
+
+      # ── Build + deploy re-scan trigger Lambda ────────────────────────────
+      - name: Build rescan trigger Lambda package
+        run: |
+          BUILD=$(mktemp -d)
+          cp backend/rescan/rescan_trigger.py "$BUILD/rescan_trigger.py"
+          cd "$BUILD" && zip -r "$GITHUB_WORKSPACE/lambda-rescan.zip" .
+
+      - name: Get rescan trigger function name
+        id: lambda_rescan
+        working-directory: terraform/phase3
+        run: echo "name=$(terraform output -raw rescan_trigger_function_name)" >> $GITHUB_OUTPUT
+
+      - name: Update rescan trigger Lambda code
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ steps.lambda_rescan.outputs.name }}" \
+            --zip-file fileb://lambda-rescan.zip \
+            --query 'FunctionArn' --output text
+
+      - name: Get Stripe price IDs
+        id: stripe_prices
+        working-directory: terraform/phase3
+        run: |
+          echo "pro=$(terraform output -raw stripe_pro_price_id)" >> $GITHUB_OUTPUT
+          echo "enterprise=$(terraform output -raw stripe_enterprise_price_id)" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+        env:
+          VITE_API_BASE_URL: https://img.craftingnewtech.com
+          VITE_COGNITO_USER_POOL_ID:         ${{ vars.VITE_COGNITO_USER_POOL_ID_PROD }}
+          VITE_COGNITO_CLIENT_ID:            ${{ vars.VITE_COGNITO_CLIENT_ID_PROD }}
+          VITE_STRIPE_PRO_PRICE_ID:         ${{ steps.stripe_prices.outputs.pro }}
+          VITE_STRIPE_ENTERPRISE_PRICE_ID:  ${{ steps.stripe_prices.outputs.enterprise }}
+
+      - name: Sync frontend to S3
+        run: |
+          BUCKET=$(cd terraform/phase1 && \
+            terraform init -backend-config=environments/prod/backend.hcl -reconfigure > /dev/null 2>&1 && \
+            terraform output -raw frontend_bucket 2>/dev/null) || BUCKET="img-analyzer-prod-frontend"
+          aws s3 sync frontend/dist/ s3://$BUCKET/ --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+          aws s3 cp frontend/dist/index.html s3://$BUCKET/index.html \
+            --cache-control "no-cache,no-store,must-revalidate"
+
+      - name: CloudFront invalidation
+        run: |
+          DIST_ID=$(cd terraform/phase1 && \
+            terraform init -backend-config=environments/prod/backend.hcl -reconfigure > /dev/null 2>&1 && \
+            terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "${{ vars.CF_DIST_ID_PROD }}")
+          aws cloudfront create-invalidation \
+            --distribution-id "$DIST_ID" \
+            --paths "/index.html"

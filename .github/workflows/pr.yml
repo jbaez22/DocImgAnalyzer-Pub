@@ -1,0 +1,348 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'terraform/phase1/**'
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/**'
+
+# Cancel in-progress runs for the same PR when new commits are pushed
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write       # Required for AWS OIDC token
+  pull-requests: write  # Required to post plan comment
+
+env:
+  TF_VERSION: '1.15.6'
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '22'
+  # Plan against the target environment: PRs to main -> prod, PRs to develop -> dev
+  TF_ENV: ${{ github.base_ref == 'main' && 'prod' || 'dev' }}
+
+# ---------------------------------------------------------------------------
+# Job 1 - Detect which paths changed to skip irrelevant jobs
+# ---------------------------------------------------------------------------
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      terraform: ${{ steps.filter.outputs.terraform }}
+      backend:   ${{ steps.filter.outputs.backend }}
+      frontend:  ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            terraform:
+              - 'terraform/phase1/**'
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
+# ---------------------------------------------------------------------------
+# Job 2 - Terraform format + validate (no AWS credentials needed)
+# ---------------------------------------------------------------------------
+  terraform-fmt:
+    name: Terraform Format & Validate
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform fmt check
+        run: terraform -chdir=terraform/phase1 fmt -check -recursive
+
+      - name: Terraform validate
+        # Use -backend=false so we skip S3 backend init (no AWS needed for validate)
+        run: |
+          terraform -chdir=terraform/phase1 init -backend=false
+          terraform -chdir=terraform/phase1 validate
+
+# ---------------------------------------------------------------------------
+# Job 3 - Terraform plan (requires AWS OIDC)
+# NOTE: The IAM OIDC trust policy must include subject
+#       repo:jbaez22/DocImgAnalizer:pull_request for this job to authenticate.
+# ---------------------------------------------------------------------------
+  terraform-plan:
+    name: Terraform Plan (${{ github.base_ref == 'main' && 'prod' || 'dev' }})
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: GitHubActions-PR-${{ github.event.pull_request.number }}
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: |
+          terraform -chdir=terraform/phase1 init \
+            -backend-config=environments/${{ env.TF_ENV }}/backend.hcl
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          set +e
+          terraform -chdir=terraform/phase1 plan \
+            -var-file=environments/${{ env.TF_ENV }}/terraform.tfvars \
+            -no-color \
+            -out=terraform/phase1/plan.tfplan 2>&1 | tee /tmp/plan_output.txt
+          PLAN_EXIT=${PIPESTATUS[0]}
+          echo "plan_exit=${PLAN_EXIT}" >> $GITHUB_OUTPUT
+          set -e
+
+      - name: Render plan summary
+        id: show
+        if: always()
+        run: |
+          if [ -f terraform/phase1/plan.tfplan ]; then
+            terraform -chdir=terraform/phase1 show -no-color plan.tfplan > /tmp/plan_show.txt 2>&1 || true
+          else
+            cp /tmp/plan_output.txt /tmp/plan_show.txt
+          fi
+
+      - name: Post plan as PR comment
+        if: always()
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const raw = fs.readFileSync('/tmp/plan_show.txt', 'utf8');
+            const maxLen = 60000;
+            const body_plan = raw.length > maxLen
+              ? raw.slice(0, maxLen) + '\n\n[WARN]  Output truncated - see full logs in GitHub Actions.'
+              : raw;
+
+            const status = '${{ steps.plan.outputs.plan_exit }}' === '1'
+              ? '[FAIL] Plan failed'
+              : '${{ steps.plan.outputs.plan_exit }}' === '2' || '${{ steps.plan.outputs.plan_exit }}' === '0'
+              ? '[OK] Plan succeeded'
+              : '[WARN]  Unknown exit code';
+
+            const body = [
+              `## Terraform Plan - \`${{ env.TF_ENV }}\` ${status}`,
+              '',
+              '<details><summary>Show Plan Output</summary>',
+              '',
+              '```hcl',
+              body_plan,
+              '```',
+              '',
+              '</details>',
+              '',
+              `*PR #${{ github.event.pull_request.number }} . Commit \`${{ github.sha }}\`*`,
+            ].join('\n');
+
+            // Delete stale plan comments from previous pushes to this PR
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            for (const c of comments.data) {
+              if (c.user.type === 'Bot' && c.body.startsWith('## Terraform Plan')) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: c.id,
+                });
+              }
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail if plan errored
+        if: steps.plan.outputs.plan_exit == '1'
+        run: |
+          echo "Terraform plan returned exit code 1 (error). See the PR comment for details."
+          exit 1
+
+# ---------------------------------------------------------------------------
+# Job 4 - Trivy IaC security scan
+# ---------------------------------------------------------------------------
+  trivy-iac:
+    name: Trivy IaC Scan
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Trivy IaC scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: terraform/phase1/
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          format: table
+
+# ---------------------------------------------------------------------------
+# Job 5 - Backend lint, type-check & tests
+# ---------------------------------------------------------------------------
+  backend-lint:
+    name: Backend Lint & Test
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dev dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Ruff lint
+        run: ruff check backend/
+
+      - name: Ruff format check
+        run: ruff format --check backend/
+
+      - name: Pytest with coverage
+        run: |
+          cd backend
+          pytest tests/ -v \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-fail-under=80
+
+# ---------------------------------------------------------------------------
+# Job 6 - Backend dependency security audit
+# ---------------------------------------------------------------------------
+  backend-audit:
+    name: Backend Security Audit
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit production dependencies
+        run: pip-audit -r backend/requirements.txt --desc
+
+# ---------------------------------------------------------------------------
+# Job 7 - Dockerfile analysis via docker-analyzer-action (demo + self-validation)
+# ---------------------------------------------------------------------------
+  dockerfile-score:
+    name: Dockerfile Score
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Analyze backend Dockerfile
+        id: dia
+        uses: jbaez22/docker-analyzer-action@v1
+        with:
+          api-key: ${{ secrets.DOCKER_ANALYZER_KEY }}
+          dockerfile: backend/Dockerfile
+          fail-on-score-below: 0
+          fail-on-severity: NONE
+        continue-on-error: true
+
+      - name: Report score
+        if: steps.dia.outcome != 'skipped'
+        run: |
+          echo "Score: ${{ steps.dia.outputs.score }}"
+          echo "Errors: ${{ steps.dia.outputs.error-count }}"
+          echo "Warnings: ${{ steps.dia.outputs.warning-count }}"
+
+# ---------------------------------------------------------------------------
+# Job 8 - Frontend lint, TypeScript build check & npm audit
+# ---------------------------------------------------------------------------
+  frontend-checks:
+    name: Frontend Lint, Build & Audit
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix frontend
+
+      - name: ESLint
+        run: npm run lint --prefix frontend
+
+      - name: TypeScript build check
+        run: npm run build --prefix frontend
+        env:
+          VITE_API_BASE_URL: https://img.craftingnewtech.com
+
+      - name: npm audit (prod deps)
+        run: npm audit --audit-level=high --omit=dev --prefix frontend
+
+# ---------------------------------------------------------------------------
+# Job 8 - Unified status gate (required branch protection check)
+# ---------------------------------------------------------------------------
+  pr-ready:
+    name: PR Ready
+    needs:
+      - terraform-fmt
+      - terraform-plan
+      - trivy-iac
+      - backend-lint
+      - backend-audit
+      - dockerfile-score
+      - frontend-checks
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate job results
+        run: |
+          results='${{ toJson(needs) }}'
+          failed=$(echo "$results" | jq -r 'to_entries[] | select(.value.result == "failure") | .key')
+          if [ -n "$failed" ]; then
+            echo "The following jobs failed: $failed"
+            exit 1
+          fi
+          echo "All required checks passed (jobs with no relevant changes were skipped)."

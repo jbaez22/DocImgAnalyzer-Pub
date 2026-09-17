@@ -1,0 +1,15 @@
+project_name         = "img-analyzer"
+environment          = "prod"
+aws_region           = "us-east-1"
+owner                = "jose"
+github_org           = "jbaez22"
+github_repo          = "DocImgAnalizer"
+api_domain_name      = "img.craftingnewtech.com"
+frontend_domain_name = "imgapp.craftingnewtech.com"
+hosted_zone_id       = "ABC-EXAMPLE-XXXX"
+alert_email          = "you@example.com"
+state_bucket         = "ABC-EXAMPLE-XXXX"
+state_lock_table     = "ABC-EXAMPLE-XXXX-lock"
+waf_rate_limit       = 1000
+log_retention_days   = 14
+dynamodb_ttl_days    = 90

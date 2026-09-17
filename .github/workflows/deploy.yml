@@ -1,0 +1,404 @@
+name: Deploy
+
+# Triggers:
+#   - workflow_dispatch only -- choose dev or prod explicitly.
+#
+# push: removed 2026-07-17. Required-reviewer environment protection is not
+# available on this GitHub plan (private repo, Free tier) -- the "manual
+# approval gate" this workflow used to claim for prod never actually existed
+# (protection_rules: [] on both `development` and `production` environments,
+# confirmed via the GitHub API). An unattended push-triggered apply on `main`
+# is what resurrected a WAF WebACL that had been destroyed for cost savings,
+# and the same gap on `develop` could have silently recreated an entire
+# decommissioned dev environment. workflow_dispatch makes every deploy a
+# deliberate action instead of an incidental side effect of a docs/code push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        type: choice
+        options: [dev, prod]
+        required: true
+        default: dev
+
+# Never cancel an in-progress deploy - partial deploys leave infrastructure in
+# an inconsistent state. Queue instead by using cancel-in-progress: false.
+concurrency:
+  group: deploy-${{ github.ref_name }}-${{ github.event.inputs.environment || '' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write  # Required for AWS OIDC
+
+env:
+  TF_VERSION: '1.15.6'
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '22'
+  AWS_REGION: us-east-1
+
+# ---------------------------------------------------------------------------
+# Job 1 - Fast validation before any deployment
+# Runs tests so that workflow_dispatch (which bypasses PR checks) is also safe.
+# ---------------------------------------------------------------------------
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install backend dev dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Ruff lint
+        run: ruff check backend/
+
+      - name: Pytest
+        run: |
+          cd backend
+          pytest tests/ -v --tb=short
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Frontend TypeScript build check
+        run: npm run build --prefix frontend
+        env:
+          VITE_API_BASE_URL: https://img.craftingnewtech.com
+
+# ---------------------------------------------------------------------------
+# Job 2 - Deploy to DEVELOPMENT
+# Triggered only via workflow_dispatch env=dev -- see trigger comment above.
+# ---------------------------------------------------------------------------
+  deploy-dev:
+    name: Deploy - dev
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev'
+    runs-on: ubuntu-latest
+    environment: development
+    env:
+      TF_ENV: dev
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # -- AWS Credentials (OIDC - no static access keys) ------------------
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Deploy-dev-${{ github.run_id }}
+
+      # -- Terraform --------------------------------------------------------
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false  # Disable wrapper so we can capture output cleanly
+
+      - name: Terraform Init
+        run: |
+          terraform -chdir=terraform/phase1 init \
+            -backend-config=environments/${{ env.TF_ENV }}/backend.hcl
+
+      - name: Terraform Plan
+        run: |
+          terraform -chdir=terraform/phase1 plan \
+            -var-file=environments/${{ env.TF_ENV }}/terraform.tfvars \
+            -no-color \
+            -out=tfplan
+
+      - name: Terraform Apply
+        run: |
+          terraform -chdir=terraform/phase1 apply \
+            -no-color \
+            tfplan
+
+      - name: Capture Terraform outputs
+        id: tf_out
+        run: |
+          OUTPUTS=$(terraform -chdir=terraform/phase1 output -json)
+          echo "lambda_name=$(echo "$OUTPUTS"     | jq -r '.lambda_function_name.value')"       >> $GITHUB_OUTPUT
+          echo "frontend_bucket=$(echo "$OUTPUTS"  | jq -r '.frontend_bucket.value')"           >> $GITHUB_OUTPUT
+          echo "cf_dist_id=$(echo "$OUTPUTS"       | jq -r '.cloudfront_distribution_id.value')" >> $GITHUB_OUTPUT
+          echo "api_endpoint=$(echo "$OUTPUTS"     | jq -r '.api_endpoint.value')"              >> $GITHUB_OUTPUT
+
+      # -- Lambda deployment ------------------------------------------------
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Lambda package
+        run: |
+          cd backend
+
+          # Install production deps cross-compiled for Lambda (linux/amd64, Python 3.12)
+          pip install -r requirements.txt \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 \
+            --only-binary=:all: \
+            --implementation cp \
+            -t package/
+
+          # Remove AWS SDK - provided by the Lambda runtime; reduces package size significantly
+          rm -rf package/boto3 package/botocore package/s3transfer
+
+          # Copy application source
+          cp -r app package/
+
+          # Strip bytecode
+          find package -name "*.pyc" -delete
+          find package -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
+          # Create deployment zip
+          cd package
+          zip -r9 ../function.zip . -x "*.dist-info/*" > /dev/null
+          cd ..
+
+          echo "Lambda package size: $(du -sh function.zip | cut -f1)"
+
+      - name: Deploy Lambda function
+        run: |
+          LAMBDA_NAME="${{ steps.tf_out.outputs.lambda_name }}"
+
+          # Update code and publish a new version atomically
+          VERSION=$(aws lambda update-function-code \
+            --function-name "$LAMBDA_NAME" \
+            --zip-file fileb://backend/function.zip \
+            --publish \
+            --architectures x86_64 \
+            --query 'Version' \
+            --output text)
+
+          echo "Published Lambda version: $VERSION"
+
+          # Wait for the update to complete before updating the alias
+          aws lambda wait function-updated-v2 --function-name "$LAMBDA_NAME"
+
+          # Point the 'live' alias to the new version
+          aws lambda update-alias \
+            --function-name "$LAMBDA_NAME" \
+            --name live \
+            --function-version "$VERSION"
+
+          echo "Lambda alias 'live' -> version $VERSION"
+
+      # -- Frontend deployment ----------------------------------------------
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: npm ci --prefix frontend && npm run build --prefix frontend
+        env:
+          VITE_API_BASE_URL: https://img.craftingnewtech.com
+
+      - name: Deploy frontend to S3
+        run: |
+          BUCKET="${{ steps.tf_out.outputs.frontend_bucket }}"
+
+          # Sync hashed assets with long-lived cache (Vite fingerprints filenames)
+          aws s3 sync frontend/dist/ "s3://${BUCKET}/" \
+            --delete \
+            --exclude "index.html" \
+            --cache-control "public, max-age=31536000, immutable"
+
+          # Upload index.html with no-cache (SPA entry point must always be fresh)
+          aws s3 cp frontend/dist/index.html "s3://${BUCKET}/index.html" \
+            --cache-control "no-cache, no-store, must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.tf_out.outputs.cf_dist_id }}" \
+            --paths "/index.html"
+
+      # -- Smoke test -------------------------------------------------------
+      - name: Smoke test
+        run: |
+          API_BASE_URL="${{ steps.tf_out.outputs.api_endpoint }}" bash scripts/smoke-test.sh
+
+      - name: Deployment summary
+        run: |
+          echo "[OK] Terraform applied (dev)"
+          echo "[OK] Lambda deployed: ${{ steps.tf_out.outputs.lambda_name }}"
+          echo "[OK] Frontend deployed to S3: ${{ steps.tf_out.outputs.frontend_bucket }}"
+          echo "[OK] CloudFront cache invalidated: ${{ steps.tf_out.outputs.cf_dist_id }}"
+          echo "[OK] Smoke test passed: ${{ steps.tf_out.outputs.api_endpoint }}"
+
+# ---------------------------------------------------------------------------
+# Job 3 - Deploy to PRODUCTION
+# Triggered only via workflow_dispatch env=prod -- see trigger comment above.
+# Required-reviewer protection on the 'production' GitHub Environment is not
+# available on this plan (Free private repo) -- workflow_dispatch is the
+# actual gate: a human must explicitly choose 'prod' and run this workflow.
+# ---------------------------------------------------------------------------
+  deploy-prod:
+    name: Deploy - prod
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      TF_ENV: prod
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # -- AWS Credentials (OIDC - no static access keys) ------------------
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Deploy-prod-${{ github.run_id }}
+
+      # -- Terraform --------------------------------------------------------
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: |
+          terraform -chdir=terraform/phase1 init \
+            -backend-config=environments/${{ env.TF_ENV }}/backend.hcl
+
+      - name: Terraform Plan
+        run: |
+          terraform -chdir=terraform/phase1 plan \
+            -var-file=environments/${{ env.TF_ENV }}/terraform.tfvars \
+            -no-color \
+            -out=tfplan
+
+      - name: Terraform Apply
+        run: |
+          terraform -chdir=terraform/phase1 apply \
+            -no-color \
+            tfplan
+
+      - name: Capture Terraform outputs
+        id: tf_out
+        run: |
+          OUTPUTS=$(terraform -chdir=terraform/phase1 output -json)
+          echo "lambda_name=$(echo "$OUTPUTS"     | jq -r '.lambda_function_name.value')"       >> $GITHUB_OUTPUT
+          echo "frontend_bucket=$(echo "$OUTPUTS"  | jq -r '.frontend_bucket.value')"           >> $GITHUB_OUTPUT
+          echo "cf_dist_id=$(echo "$OUTPUTS"       | jq -r '.cloudfront_distribution_id.value')" >> $GITHUB_OUTPUT
+          echo "api_endpoint=$(echo "$OUTPUTS"     | jq -r '.api_endpoint.value')"              >> $GITHUB_OUTPUT
+
+      # -- Lambda deployment ------------------------------------------------
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Lambda package
+        run: |
+          cd backend
+
+          pip install -r requirements.txt \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 \
+            --only-binary=:all: \
+            --implementation cp \
+            -t package/
+
+          rm -rf package/boto3 package/botocore package/s3transfer
+
+          cp -r app package/
+
+          find package -name "*.pyc" -delete
+          find package -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
+          cd package
+          zip -r9 ../function.zip . -x "*.dist-info/*" > /dev/null
+          cd ..
+
+          echo "Lambda package size: $(du -sh function.zip | cut -f1)"
+
+      - name: Deploy Lambda function
+        run: |
+          LAMBDA_NAME="${{ steps.tf_out.outputs.lambda_name }}"
+
+          VERSION=$(aws lambda update-function-code \
+            --function-name "$LAMBDA_NAME" \
+            --zip-file fileb://backend/function.zip \
+            --publish \
+            --architectures x86_64 \
+            --query 'Version' \
+            --output text)
+
+          echo "Published Lambda version: $VERSION"
+
+          aws lambda wait function-updated-v2 --function-name "$LAMBDA_NAME"
+
+          aws lambda update-alias \
+            --function-name "$LAMBDA_NAME" \
+            --name live \
+            --function-version "$VERSION"
+
+          echo "Lambda alias 'live' -> version $VERSION"
+
+      # -- Frontend deployment ----------------------------------------------
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: npm ci --prefix frontend && npm run build --prefix frontend
+        env:
+          VITE_API_BASE_URL: https://img.craftingnewtech.com
+          VITE_COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
+
+      - name: Deploy frontend to S3
+        run: |
+          BUCKET="${{ steps.tf_out.outputs.frontend_bucket }}"
+
+          aws s3 sync frontend/dist/ "s3://${BUCKET}/" \
+            --delete \
+            --exclude "index.html" \
+            --cache-control "public, max-age=31536000, immutable"
+
+          aws s3 cp frontend/dist/index.html "s3://${BUCKET}/index.html" \
+            --cache-control "no-cache, no-store, must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.tf_out.outputs.cf_dist_id }}" \
+            --paths "/index.html"
+
+      # -- Smoke test -------------------------------------------------------
+      - name: Smoke test
+        run: |
+          API_BASE_URL="${{ steps.tf_out.outputs.api_endpoint }}" bash scripts/smoke-test.sh
+        env:
+          COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
+          COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
+
+      - name: Deployment summary
+        run: |
+          echo "[OK] Terraform applied (prod)"
+          echo "[OK] Lambda deployed: ${{ steps.tf_out.outputs.lambda_name }}"
+          echo "[OK] Frontend deployed to S3: ${{ steps.tf_out.outputs.frontend_bucket }}"
+          echo "[OK] CloudFront cache invalidated: ${{ steps.tf_out.outputs.cf_dist_id }}"
+          echo "[OK] Smoke test passed: ${{ steps.tf_out.outputs.api_endpoint }}"

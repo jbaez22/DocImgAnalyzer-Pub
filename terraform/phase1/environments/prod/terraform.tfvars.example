@@ -1,0 +1,19 @@
+# Copy this file to terraform.tfvars and fill in the values.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+
+project_name         = "img-analyzer"
+environment          = "prod"
+aws_region           = "us-east-1"
+owner                = "<your-name>"
+github_org           = "<your-github-org-or-username>"
+github_repo          = "DocImgAnalizer"
+api_domain_name      = "<api-subdomain.your-domain.com>"
+frontend_domain_name = "<app-subdomain.your-domain.com>"
+hosted_zone_id       = "<route53-hosted-zone-id>"
+alert_email          = "<your-email@example.com>"
+state_bucket         = "<terraform-state-s3-bucket-name>"
+state_lock_table     = "<terraform-state-dynamodb-lock-table-name>"
+waf_rate_limit       = 1000
+log_retention_days   = 14
+dynamodb_ttl_days    = 90

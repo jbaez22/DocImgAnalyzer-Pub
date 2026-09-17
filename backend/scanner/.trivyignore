@@ -1,0 +1,12 @@
+# Scanner image — upstream tool binary CVEs
+# These CVEs are in the trivy and syft binaries we copy from their official images.
+# They require the tool vendors to release new builds compiled with the patched Go stdlib.
+# Tracked for upgrade when trivy > 0.72.0 and syft > 1.46.0 are available with fixes.
+# The scanner runs in private Fargate subnets with no inbound exposure.
+
+# syft v1.46.0 — Go stdlib v1.26.3 (fix: v1.26.4 rebuild needed from Anchore)
+CVE-2026-27145
+CVE-2026-42504
+
+# trivy v0.72.0 — oras-go v2.6.0 (fix: v2.6.1 rebuild needed from Aqua)
+CVE-2026-50151

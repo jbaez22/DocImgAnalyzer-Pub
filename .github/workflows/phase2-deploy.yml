@@ -1,0 +1,392 @@
+name: Phase 2 Deploy
+
+# push trigger re-added 2026-07-20 -- runs the `validate` job only (fast
+# lint/test/build feedback, no infra cost or risk). Deploying to dev or prod
+# still requires an explicit workflow_dispatch: the deploy-dev/deploy-prod
+# `if:` conditions below only match workflow_dispatch, so a push never
+# triggers terraform apply. Private repos can't get real required-reviewer
+# approval gates below GitHub Enterprise Cloud (~$21/user/mo, ~50-100 seat
+# minimum) -- not worth it for a solo portfolio project -- so deploys stay a
+# deliberate manual action instead of a side effect of a push.
+on:
+  push:
+    branches: [phase2]
+    paths:
+      - 'terraform/phase2/**'
+      - 'backend/v2/**'
+      - 'backend/scanner/**'
+      - 'frontend/**'
+      - '.github/workflows/phase2-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, prod]
+
+concurrency:
+  group: phase2-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VERSION:     '1.15.6'
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION:   '22'
+
+jobs:
+  # ── Validate (lint + tests + frontend build check) ──────────────────────────
+  # Mirrors deploy.yml's Validate job -- runs before any deploy job so a
+  # broken lint/test/build never reaches terraform apply.
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install backend dev dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Ruff lint
+        run: ruff check backend/
+
+      - name: Pytest
+        run: |
+          cd backend
+          pytest tests/ -v --tb=short
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Frontend TypeScript build check
+        run: npm run build --prefix frontend
+        env:
+          VITE_API_BASE_URL: https://img.craftingnewtech.com
+
+  # ── Deploy to dev (manual only -- dev decommissioned 2026-07-16 to cut cost,
+  #    recreate via workflow_dispatch when actively developing) ──────────────
+  deploy-dev:
+    name: Deploy — dev
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev'
+    runs-on: ubuntu-latest
+    environment: phase2-development
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # ── Patch Phase 1 API Gateway CORS (DELETE required for scan history) ──
+      # Phase 1 Terraform originally only allowed GET/POST/OPTIONS.
+      # This step keeps the CORS config current without a full Phase 1 apply.
+      - name: Patch API Gateway CORS (dev)
+        run: |
+          API_ID=$(aws apigatewayv2 get-apis \
+            --query "Items[?Name=='img-analyzer-dev-api'].ApiId" \
+            --output text)
+          aws apigatewayv2 update-api \
+            --api-id "$API_ID" \
+            --cors-configuration '{"AllowOrigins":["https://dev-imgapp.craftingnewtech.com"],"AllowMethods":["GET","POST","PUT","DELETE","OPTIONS"],"AllowHeaders":["Content-Type","Authorization"],"MaxAge":3600}'
+
+      # ── Terraform apply ──────────────────────────────────────────────────
+      - name: terraform init (dev)
+        working-directory: terraform/phase2
+        run: terraform init -backend-config=environments/dev/backend.hcl
+      # Apply IAM first so new permissions propagate before resource operations
+      - name: terraform apply IAM (dev)
+        working-directory: terraform/phase2
+        run: |
+          terraform apply -target=module.iam_phase2 -var-file=environments/dev/terraform.tfvars -auto-approve
+          sleep 15
+      - name: terraform apply (dev)
+        working-directory: terraform/phase2
+        run: terraform apply -var-file=environments/dev/terraform.tfvars -auto-approve
+
+      # ── Build + push scanner image to ECR ───────────────────────────────
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build + push scanner to ECR
+        run: |
+          ECR_URL=$(cd terraform/phase2 && terraform output -raw ecr_repository_url)
+          SHA_TAG="$ECR_URL:${{ github.sha }}"
+          docker build --platform linux/amd64 -t "$SHA_TAG" backend/scanner/
+          docker push "$SHA_TAG"
+          echo "ECR_SHA_IMAGE=$SHA_TAG" >> "$GITHUB_ENV"
+      - name: Update ECS task definition and Pipe
+        working-directory: terraform/phase2
+        run: |
+          FAMILY="$(terraform output -raw ecs_cluster_name | sed 's/-phase2//')-scanner"
+          PIPE_NAME="$(terraform output -raw pipe_name)"
+          NEW_IMG="$ECR_SHA_IMAGE"
+
+          # Register a new task definition revision with the updated image
+          CURRENT=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query taskDefinition --output json)
+          NEW_DEF=$(echo "$CURRENT" | jq --arg img "$NEW_IMG" \
+            '.containerDefinitions[0].image = $img | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.placementConstraints,.compatibilities,.registeredAt,.registeredBy)')
+          NEW_TASK_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "New task def: $NEW_TASK_ARN"
+
+          # Build Pipe target params from Terraform outputs (avoids cpu/memory zero corruption)
+          # fargate_subnet_ids/fargate_assign_public_ip (not private_subnet_ids
+          # directly) -- correct for environments that haven't done the NAT
+          # Gateway migration yet, see var.fargate_use_private_subnet.
+          SUBNETS=$(terraform output -json fargate_subnet_ids | jq -c '.')
+          ASSIGN_PUBLIC_IP=$(terraform output -raw fargate_assign_public_ip)
+          SG=$(terraform output -raw fargate_task_sg_id)
+          PIPE_ROLE=$(aws pipes describe-pipe --name "$PIPE_NAME" --region us-east-1 --query 'RoleArn' --output text)
+          NEW_TARGET=$(jq -n \
+            --arg arn "$NEW_TASK_ARN" \
+            --argjson subnets "$SUBNETS" \
+            --arg sg "$SG" \
+            --arg assign_ip "$ASSIGN_PUBLIC_IP" \
+            '{
+              "EcsTaskParameters": {
+                "TaskDefinitionArn": $arn,
+                "TaskCount": 1,
+                "LaunchType": "FARGATE",
+                "NetworkConfiguration": {
+                  "awsvpcConfiguration": {
+                    "Subnets": $subnets,
+                    "SecurityGroups": [$sg],
+                    "AssignPublicIp": $assign_ip
+                  }
+                },
+                "Overrides": {
+                  "ContainerOverrides": [{
+                    "Name": "scanner",
+                    "Environment": [{"name": "SQS_MESSAGE", "value": "<$.body>"}]
+                  }]
+                }
+              }
+            }')
+          aws pipes update-pipe --name "$PIPE_NAME" --role-arn "$PIPE_ROLE" \
+            --target-parameters "$NEW_TARGET" --region us-east-1 --query 'Arn' --output text
+
+      # ── Deploy Lambda v2 ─────────────────────────────────────────────────
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build Lambda v2 package
+        run: |
+          BUILD=$(mktemp -d)
+          pip install --platform manylinux2014_x86_64 --python-version 3.12 --only-binary=:all: \
+            --target "$BUILD" -r backend/requirements.txt
+          cp -r backend/v2 "$BUILD/"
+          cp -r backend/app "$BUILD/"
+          cd "$BUILD" && zip -r "$GITHUB_WORKSPACE/lambda-v2.zip" .
+      - name: Get Lambda v2 function name
+        id: lambda
+        working-directory: terraform/phase2
+        run: echo "name=$(terraform output -raw lambda_v2_function_name)" >> $GITHUB_OUTPUT
+      - name: Update Lambda v2 code
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ steps.lambda.outputs.name }} \
+            --zip-file fileb://lambda-v2.zip
+
+      # ── Deploy frontend ──────────────────────────────────────────────────
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: https://dev-img.craftingnewtech.com
+          VITE_COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
+      - name: Sync frontend to S3
+        run: |
+          BUCKET=$(cd terraform/phase1 && terraform init -backend-config=environments/dev/backend.hcl -reconfigure > /dev/null 2>&1 && terraform output -raw frontend_bucket 2>/dev/null) || BUCKET="img-analyzer-dev-frontend"
+          aws s3 sync frontend/dist/ s3://$BUCKET/ --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+          aws s3 cp frontend/dist/index.html s3://$BUCKET/index.html \
+            --cache-control "no-cache,no-store,must-revalidate"
+      - name: CloudFront invalidation
+        run: |
+          DIST_ID=$(cd terraform/phase1 && terraform init -backend-config=environments/dev/backend.hcl -reconfigure > /dev/null 2>&1 && terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "${{ vars.CF_DIST_ID_DEV }}")
+          aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/index.html"
+
+      # ── Smoke test ────────────────────────────────────────────────────────
+      - name: Smoke test
+        run: |
+          API_BASE_URL=https://dev-img.craftingnewtech.com bash scripts/smoke-test.sh
+
+  # ── Deploy to prod (manual approval required) ───────────────────────────────
+  deploy-prod:
+    name: Deploy — prod
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: phase2-production
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_PROD }}
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - name: Patch API Gateway CORS (prod)
+        run: |
+          API_ID=$(aws apigatewayv2 get-apis \
+            --query "Items[?Name=='img-analyzer-prod-api'].ApiId" \
+            --output text)
+          aws apigatewayv2 update-api \
+            --api-id "$API_ID" \
+            --cors-configuration '{"AllowOrigins":["https://imgapp.craftingnewtech.com"],"AllowMethods":["GET","POST","PUT","DELETE","OPTIONS"],"AllowHeaders":["Content-Type","Authorization"],"MaxAge":3600}'
+      - name: terraform init (prod)
+        working-directory: terraform/phase2
+        run: terraform init -backend-config=environments/prod/backend.hcl
+      - name: terraform apply IAM (prod)
+        working-directory: terraform/phase2
+        run: |
+          terraform apply -target=module.iam_phase2 -var-file=environments/prod/terraform.tfvars -auto-approve
+          sleep 15
+      - name: terraform apply (prod)
+        working-directory: terraform/phase2
+        run: terraform apply -var-file=environments/prod/terraform.tfvars -auto-approve
+
+      # ── Build + push scanner image to prod ECR ───────────────────────────
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build + push scanner to ECR (prod)
+        run: |
+          ECR_URL=$(cd terraform/phase2 && terraform output -raw ecr_repository_url)
+          SHA_TAG="$ECR_URL:${{ github.sha }}"
+          docker build --platform linux/amd64 -t "$SHA_TAG" backend/scanner/
+          docker push "$SHA_TAG"
+          echo "ECR_SHA_IMAGE=$SHA_TAG" >> "$GITHUB_ENV"
+      - name: Update ECS task definition and Pipe (prod)
+        working-directory: terraform/phase2
+        run: |
+          FAMILY="$(terraform output -raw ecs_cluster_name | sed 's/-phase2//')-scanner"
+          PIPE_NAME="$(terraform output -raw pipe_name)"
+          NEW_IMG="$ECR_SHA_IMAGE"
+
+          CURRENT=$(aws ecs describe-task-definition --task-definition "$FAMILY" --query taskDefinition --output json)
+          NEW_DEF=$(echo "$CURRENT" | jq --arg img "$NEW_IMG" \
+            '.containerDefinitions[0].image = $img | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.placementConstraints,.compatibilities,.registeredAt,.registeredBy)')
+          NEW_TASK_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "New task def: $NEW_TASK_ARN"
+
+          # fargate_subnet_ids/fargate_assign_public_ip (not private_subnet_ids
+          # directly) -- correct for environments that haven't done the NAT
+          # Gateway migration yet, see var.fargate_use_private_subnet.
+          SUBNETS=$(terraform output -json fargate_subnet_ids | jq -c '.')
+          ASSIGN_PUBLIC_IP=$(terraform output -raw fargate_assign_public_ip)
+          SG=$(terraform output -raw fargate_task_sg_id)
+          PIPE_ROLE=$(aws pipes describe-pipe --name "$PIPE_NAME" --region us-east-1 --query 'RoleArn' --output text)
+          NEW_TARGET=$(jq -n \
+            --arg arn "$NEW_TASK_ARN" \
+            --argjson subnets "$SUBNETS" \
+            --arg sg "$SG" \
+            --arg assign_ip "$ASSIGN_PUBLIC_IP" \
+            '{
+              "EcsTaskParameters": {
+                "TaskDefinitionArn": $arn,
+                "TaskCount": 1,
+                "LaunchType": "FARGATE",
+                "NetworkConfiguration": {
+                  "awsvpcConfiguration": {
+                    "Subnets": $subnets,
+                    "SecurityGroups": [$sg],
+                    "AssignPublicIp": $assign_ip
+                  }
+                },
+                "Overrides": {
+                  "ContainerOverrides": [{
+                    "Name": "scanner",
+                    "Environment": [{"name": "SQS_MESSAGE", "value": "<$.body>"}]
+                  }]
+                }
+              }
+            }')
+          aws pipes update-pipe --name "$PIPE_NAME" --role-arn "$PIPE_ROLE" \
+            --target-parameters "$NEW_TARGET" --region us-east-1 --query 'Arn' --output text
+
+      # ── Deploy Lambda v2 (prod) ──────────────────────────────────────────
+      # Added 2026-07-16 -- this job never had these steps, unlike deploy-dev,
+      # so prod's Lambda v2 code had never been updated via CI. Discovered
+      # live: a code fix (ecs_launcher.py assignPublicIp) was correctly
+      # committed and the function's *configuration* updated via Terraform,
+      # but the deployed *code* remained stale indefinitely since nothing
+      # ever called update-function-code for prod.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build Lambda v2 package (prod)
+        run: |
+          BUILD=$(mktemp -d)
+          pip install --platform manylinux2014_x86_64 --python-version 3.12 --only-binary=:all: \
+            --target "$BUILD" -r backend/requirements.txt
+          cp -r backend/v2 "$BUILD/"
+          cp -r backend/app "$BUILD/"
+          cd "$BUILD" && zip -r "$GITHUB_WORKSPACE/lambda-v2.zip" .
+      - name: Get Lambda v2 function name (prod)
+        id: lambda
+        working-directory: terraform/phase2
+        run: echo "name=$(terraform output -raw lambda_v2_function_name)" >> $GITHUB_OUTPUT
+      - name: Update Lambda v2 code (prod)
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ steps.lambda.outputs.name }} \
+            --zip-file fileb://lambda-v2.zip
+
+      # ── Deploy frontend (prod) ───────────────────────────────────────────
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: https://img.craftingnewtech.com
+          VITE_COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
+      - name: Sync frontend to S3
+        run: |
+          BUCKET=$(cd terraform/phase1 && terraform init -backend-config=environments/prod/backend.hcl -reconfigure > /dev/null 2>&1 && terraform output -raw frontend_bucket 2>/dev/null) || BUCKET="img-analyzer-prod-frontend"
+          aws s3 sync frontend/dist/ s3://$BUCKET/ --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+          aws s3 cp frontend/dist/index.html s3://$BUCKET/index.html \
+            --cache-control "no-cache,no-store,must-revalidate"
+      - name: CloudFront invalidation
+        run: |
+          DIST_ID=$(cd terraform/phase1 && terraform init -backend-config=environments/prod/backend.hcl -reconfigure > /dev/null 2>&1 && terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "${{ vars.CF_DIST_ID_PROD }}")
+          aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/index.html"
+
+      # ── Smoke test ────────────────────────────────────────────────────────
+      - name: Smoke test
+        run: |
+          API_BASE_URL=https://img.craftingnewtech.com bash scripts/smoke-test.sh
+        env:
+          COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
+          COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}

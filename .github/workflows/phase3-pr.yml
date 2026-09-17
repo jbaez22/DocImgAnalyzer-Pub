@@ -1,0 +1,186 @@
+name: Phase 3 PR Validation
+
+on:
+  pull_request:
+    branches: [phase3]
+    paths:
+      - 'terraform/phase3/**'
+      - 'backend/v3/**'
+      - 'backend/webhooks/**'
+      - 'frontend/**'
+      - '.github/workflows/phase3-*.yml'
+
+concurrency:
+  group: phase3-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  TF_VERSION:     '1.15.6'
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION:   '22'
+  TF_ENV:         'dev'
+
+jobs:
+  # ── Detect changed paths ────────────────────────────────────────────────────
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      terraform: ${{ steps.filter.outputs.terraform }}
+      backend:   ${{ steps.filter.outputs.backend }}
+      frontend:  ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            terraform:
+              - 'terraform/phase3/**'
+            backend:
+              - 'backend/v3/**'
+              - 'backend/webhooks/**'
+            frontend:
+              - 'frontend/**'
+
+  # ── Terraform fmt + validate ────────────────────────────────────────────────
+  terraform-fmt:
+    name: Terraform Format & Validate
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - name: terraform fmt
+        run: terraform fmt -check -recursive terraform/phase3/
+      - name: terraform validate
+        working-directory: terraform/phase3
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+  # ── Terraform plan ──────────────────────────────────────────────────────────
+  terraform-plan:
+    name: Terraform Plan (dev)
+    needs: [changes, terraform-fmt]
+    if: needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_PHASE3 }}
+          aws-region: us-east-1
+      - name: terraform init
+        working-directory: terraform/phase3
+        run: terraform init -backend-config=environments/dev/backend.hcl
+      - name: terraform plan
+        id: plan
+        working-directory: terraform/phase3
+        run: terraform plan -var-file=environments/dev/terraform.tfvars -no-color -out=tfplan 2>&1 | tee plan.txt
+      - name: Post plan as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/phase3/plan.txt', 'utf8').slice(0, 60000);
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### Phase 3 Terraform Plan (dev)\n\`\`\`\n${plan}\n\`\`\``
+            });
+
+  # ── Trivy IaC scan ──────────────────────────────────────────────────────────
+  trivy-iac:
+    name: Trivy IaC Scan
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Trivy IaC scan — phase3
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: terraform/phase3/
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          trivyignores: terraform/phase3/.trivyignore
+
+  # ── Backend v3 lint + test ──────────────────────────────────────────────────
+  backend-v3:
+    name: Backend v3 — Lint & Test
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: ruff lint
+        run: ruff check backend/v3/ backend/webhooks/
+      - name: ruff format check
+        run: ruff format --check backend/v3/ backend/webhooks/
+      - name: mypy
+        run: mypy backend/v3/ backend/webhooks/ --ignore-missing-imports
+      - name: pytest
+        run: |
+          cd backend && python -m pytest tests/test_v3_routers.py tests/test_v3_services.py \
+            -v --tb=short \
+            --cov=v3 --cov=webhooks --cov-report=term-missing
+
+  # ── Frontend lint + build ───────────────────────────────────────────────────
+  frontend:
+    name: Frontend — Lint & Build
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+  # ── Unified gate ────────────────────────────────────────────────────────────
+  pr-ready:
+    name: PR Ready
+    needs: [terraform-fmt, terraform-plan, trivy-iac, backend-v3, frontend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs passed
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results" | python3 -c "
+          import json, sys
+          needs = json.load(sys.stdin)
+          failed = [k for k, v in needs.items() if v['result'] not in ('success', 'skipped')]
+          if failed:
+              print('Failed jobs:', failed)
+              sys.exit(1)
+          print('All checks passed')
+          "

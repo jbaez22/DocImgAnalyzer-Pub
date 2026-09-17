@@ -1,0 +1,2 @@
+# No active exceptions. AWS-0345 (s3:* in GitHub Actions IAM policy) resolved
+# 2026-07-16 — tightened to explicit actions per docs/IAMAccessAnalyzerGuide.md.

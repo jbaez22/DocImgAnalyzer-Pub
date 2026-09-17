@@ -1,0 +1,13 @@
+# PoC architecture: Fargate uses public subnet + IGW instead of VPC Interface Endpoints.
+# Egress is restricted to port 443 only — Trivy checks IP range, not port range.
+# Risk accepted: all outbound traffic is HTTPS to AWS services only.
+AWS-0104
+
+# CVE reports + SBOM buckets use SSE-S3 (AWS-owned key), not a customer managed
+# key. CMK removed 2026-07-16 per Phase3DeploymentPlanPoC.md item 9 as part of
+# the cost-reduction pass (dedicated Phase 2 KMS CMK decommissioned). Risk
+# accepted: this is a portfolio project, data is Trivy/Syft scan output (CVE
+# reports, SBOMs) rather than sensitive customer data, and SSE-S3 still
+# provides encryption at rest -- just without customer-managed key rotation
+# and access-policy control.
+AWS-0132

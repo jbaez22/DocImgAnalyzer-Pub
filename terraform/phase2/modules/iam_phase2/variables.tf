@@ -1,0 +1,11 @@
+variable "project_name" { type = string }
+variable "environment" { type = string }
+variable "aws_region" { type = string }
+variable "github_org" { type = string }
+variable "github_repo" { type = string }
+variable "dynamodb_v2_table_arn" { type = string }
+variable "sqs_queue_arn" { type = string }
+variable "reports_bucket_arn" { type = string }
+variable "sbom_bucket_arn" { type = string }
+variable "state_bucket" { type = string }
+variable "state_lock_table" { type = string }

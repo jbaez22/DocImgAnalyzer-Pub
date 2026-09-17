@@ -1,0 +1,74 @@
+# ── Terraform ─────────────────────────────────────────────────────────────────
+.terraform/
+# .terraform.lock.hcl is intentionally committed — pins provider versions across the team.
+terraform.tfstate
+terraform.tfstate.backup
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ── Terraform variable files with sensitive values ────────────────────────────
+# backend.hcl and terraform.tfvars are committed (no secrets — secrets live in
+# AWS Secrets Manager). Add a pattern below only if you create a local-only
+# override file that contains credentials.
+*.secret.tfvars
+*.local.tfvars
+
+# ── Frontend build artifacts ───────────────────────────────────────────────────
+frontend/dist/
+frontend/node_modules/
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# ── Backend ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+backend/.venv/
+backend/venv/
+backend/.env
+backend/.env.local
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── Lambda deployment package ──────────────────────────────────────────────────
+*.zip
+
+# ── macOS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── IDE & local tooling ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/
+.codex/
+
+# ── Secrets scanning baseline (committed intentionally) ───────────────────────
+# .secrets.baseline is committed so detect-secrets can diff against it.
+# Do NOT add it here.
+frontend/.env.development
+
+# ── Generated resource inventory snapshots ─────────────────────────────────────
+# Regenerated on demand from docs/aws-resources-data.yaml via
+# docs/tools/generate_resource_inventory_xlsx.py — the .md output is tracked
+# (always current), but the timestamped .xlsx snapshots are not.
+docs/*.xlsx
