@@ -52,6 +52,8 @@ User → Cognito (auth) → JWT Authorizer → API Gateway → Lambda v2
                                                DynamoDB v2 (scan results)
 ```
 
+![Phase 2 Network Topology](docs/diagrams/diagram-phase2-network-v2-light.svg)
+
 - Cognito user pool with email verification
 - Asynchronous image scanning — submit and poll
 - Full CVE report (Trivy) + Software Bill of Materials (Syft) per image

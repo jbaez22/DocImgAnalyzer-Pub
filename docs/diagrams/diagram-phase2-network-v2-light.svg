@@ -1,0 +1,341 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720">
+  <defs>
+    <marker id="mBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <polygon points="0,0 10,5 0,10" fill="#2E86C1"/>
+    </marker>
+    <marker id="mGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <polygon points="0,0 10,5 0,10" fill="#1a7f37"/>
+    </marker>
+    <marker id="mOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <polygon points="0,0 10,5 0,10" fill="#FF9900"/>
+    </marker>
+    <marker id="mAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <polygon points="0,0 10,5 0,10" fill="#d97706"/>
+    </marker>
+    <marker id="mMuted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <polygon points="0,0 10,5 0,10" fill="#AAAAAA"/>
+    </marker>
+    <marker id="mPurple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <polygon points="0,0 10,5 0,10" fill="#8C4FFF"/>
+    </marker>
+  </defs>
+
+  <!-- ── Background ── -->
+  <rect width="1200" height="720" fill="#FFFFFF" rx="12"/>
+
+  <!-- ── TITLE  y=0-65 ── -->
+  <rect x="14" y="10" width="70" height="20" rx="4" fill="#EAF5FB" stroke="#2E86C1" stroke-width="1.5"/>
+  <text x="49" y="24" text-anchor="middle" fill="#2E86C1" font-family="Arial,sans-serif" font-size="10" font-weight="700">PHASE 2</text>
+  <rect x="90" y="10" width="116" height="20" rx="4" fill="#FFF8F0" stroke="#FF9900" stroke-width="1.5"/>
+  <text x="148" y="24" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="10" font-weight="700">NAT GATEWAY</text>
+  <rect x="212" y="10" width="80" height="20" rx="4" fill="#F2FAF5" stroke="#1a7f37" stroke-width="1"/>
+  <text x="252" y="24" text-anchor="middle" fill="#145A32" font-family="Arial,sans-serif" font-size="10" font-weight="700">NETWORK</text>
+  <text x="1186" y="24" text-anchor="end" fill="#555555" font-family="Arial,sans-serif" font-size="10">AWS us-east-1  ·  us-east-1a</text>
+  <text x="600" y="44" text-anchor="middle" fill="#232F3E" font-family="Arial,sans-serif" font-size="20" font-weight="900">DocImgAnalizer — Phase 2 Network Topology (NAT Gateway)</text>
+  <text x="600" y="60" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="11">Private Subnet · assignPublicIp=DISABLED · NAT Gateway → Internet Gateway · Single AZ</text>
+  <line x1="20" y1="67" x2="1180" y2="67" stroke="#D0D0D0" stroke-width="1.5"/>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       INTERNET ZONE  x=14-188, y=75-638
+  ════════════════════════════════════════════════════════════ -->
+  <rect x="14" y="75" width="174" height="563" rx="8" fill="#F5F5F5" stroke="#BBBBBB" stroke-width="1" stroke-dasharray="4,3"/>
+  <rect x="22" y="70" width="68" height="12" fill="#F5F5F5"/>
+  <text x="56" y="80" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="9" font-weight="700">INTERNET</text>
+
+  <!-- Cloud illustration -->
+  <path d="M50,158 Q38,148 38,136 Q38,120 54,118 Q56,106 70,106 Q76,98 88,100 Q102,94 106,106 Q120,106 119,120 Q126,122 124,132 Q124,146 112,150 Q112,158 100,160 Q86,164 74,160 Q60,164 50,158 Z"
+        fill="#DDEEFF" stroke="#2E86C1" stroke-width="1.5" opacity="0.9"/>
+  <text x="84" y="140" text-anchor="middle" fill="#2E86C1" font-family="Arial,sans-serif" font-size="11" font-weight="900">☁</text>
+  <text x="84" y="176" text-anchor="middle" fill="#2E86C1" font-family="Arial,sans-serif" font-size="10" font-weight="700">Internet</text>
+  <text x="84" y="190" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="8">Public traffic</text>
+
+  <!-- Docker Hub -->
+  <rect x="22" y="208" width="158" height="60" rx="5" fill="#EAF5FB" stroke="#2E86C1" stroke-width="2"/>
+  <text x="101" y="224" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="8" font-weight="700">Docker Hub</text>
+  <text x="101" y="236" text-anchor="middle" fill="#232F3E" font-family="Arial,sans-serif" font-size="7.5" font-weight="700">registry-1.docker.io</text>
+  <text x="101" y="248" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Trivy pulls TARGET image here</text>
+  <text x="101" y="260" text-anchor="middle" fill="#145A32" font-family="Arial,sans-serif" font-size="7" font-weight="700">✓ Reachable via NAT GW</text>
+
+  <!-- Amazon ECR (internet side) -->
+  <rect x="22" y="282" width="158" height="52" rx="5" fill="#FFF8F0" stroke="#FF9900" stroke-width="1"/>
+  <text x="101" y="298" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="9" font-weight="700">Amazon ECR</text>
+  <text x="101" y="311" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">img-analyzer-{env}-scanner</text>
+  <text x="101" y="323" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Scanner image — pulled via NAT GW</text>
+
+  <!-- CloudWatch Logs (internet side) -->
+  <rect x="22" y="348" width="158" height="52" rx="5" fill="#EAF5FB" stroke="#2E86C1" stroke-width="1"/>
+  <text x="101" y="364" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="9" font-weight="700">CloudWatch Logs</text>
+  <text x="101" y="377" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">/ecs/img-analyzer-{env}-scanner</text>
+  <text x="101" y="389" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Log streaming via NAT GW</text>
+
+  <!-- API Clients -->
+  <rect x="22" y="414" width="158" height="50" rx="5" fill="#EAF5FB" stroke="#2E86C1" stroke-width="1"/>
+  <text x="101" y="430" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="9" font-weight="700">API Clients</text>
+  <text x="101" y="443" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Browser · CI/CD · Stripe</text>
+  <text x="101" y="455" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">→ img.craftingnewtech.com</text>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       INTERNET GATEWAY  x=205-285, y=190-430
+  ════════════════════════════════════════════════════════════ -->
+  <rect x="205" y="190" width="80" height="240" rx="6" fill="#EAF5FB" stroke="#2E86C1" stroke-width="2"/>
+  <line x1="224" y1="280" x2="266" y2="280" stroke="#2E86C1" stroke-width="2.5"/>
+  <line x1="224" y1="290" x2="266" y2="290" stroke="#2E86C1" stroke-width="2.5"/>
+  <line x1="224" y1="300" x2="266" y2="300" stroke="#2E86C1" stroke-width="2.5"/>
+  <text x="245" y="326" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="8" font-weight="700">Internet</text>
+  <text x="245" y="338" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="8" font-weight="700">Gateway</text>
+  <text x="245" y="354" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">IGW</text>
+  <text x="245" y="366" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Attached to VPC</text>
+  <text x="245" y="378" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Scales auto</text>
+  <text x="245" y="210" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Inbound:</text>
+  <text x="245" y="221" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">user HTTPS</text>
+  <text x="245" y="234" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Outbound:</text>
+  <text x="245" y="245" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">NAT GW traffic</text>
+  <text x="245" y="258" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">to internet</text>
+
+  <!-- Internet ↔ IGW arrows -->
+  <line x1="188" y1="238" x2="205" y2="260" stroke="#2E86C1" stroke-width="1.5" marker-end="url(#mBlue)"/>
+  <line x1="205" y1="270" x2="188" y2="250" stroke="#2E86C1" stroke-width="1" stroke-dasharray="4,2" marker-end="url(#mBlue)"/>
+  <line x1="188" y1="308" x2="205" y2="308" stroke="#2E86C1" stroke-width="1.5" marker-end="url(#mBlue)"/>
+  <line x1="188" x2="205" y1="371" y2="371" stroke="#FF9900" stroke-width="1.5" marker-end="url(#mOrange)"/>
+  <line x1="188" x2="205" y1="374" y2="388" stroke="#AAAAAA" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#mMuted)"/>
+  <line x1="188" x2="205" y1="439" y2="400" stroke="#2E86C1" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#mBlue)"/>
+
+  <!-- IGW ↔ VPC arrow -->
+  <line x1="285" y1="310" x2="298" y2="310" stroke="#2E86C1" stroke-width="2" marker-end="url(#mBlue)"/>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       VPC BOUNDARY  x=298-952, y=75-638
+  ════════════════════════════════════════════════════════════ -->
+  <rect x="298" y="75" width="652" height="563" rx="10" fill="#F8FBFF" stroke="#FF9900" stroke-width="2" stroke-dasharray="8,4"/>
+  <rect x="306" y="70" width="140" height="13" fill="#F8FBFF"/>
+  <text x="376" y="81" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="9" font-weight="700">VPC: 10.0.0.0/16  ·  us-east-1</text>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       PUBLIC SUBNET  x=312-938, y=90-355
+  ════════════════════════════════════════════════════════════ -->
+  <rect x="312" y="90" width="626" height="265" rx="8" fill="#F2FAF5" stroke="#1a7f37" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <rect x="320" y="85" width="232" height="12" fill="#F2FAF5"/>
+  <text x="436" y="95" text-anchor="middle" fill="#145A32" font-family="Arial,sans-serif" font-size="9" font-weight="700">Public Subnet: 10.0.10.0/24  ·  us-east-1a</text>
+
+  <!-- Route Table (public) -->
+  <rect x="324" y="102" width="252" height="96" rx="5" fill="#EAF5FB" stroke="#2E86C1" stroke-width="1"/>
+  <text x="450" y="116" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="8" font-weight="700">Public Route Table</text>
+  <line x1="330" y1="120" x2="570" y2="120" stroke="#C8D9E8" stroke-width="1"/>
+  <text x="338" y="131" fill="#555555" font-family="Arial,sans-serif" font-size="7" font-weight="700">Destination</text>
+  <text x="468" y="131" fill="#555555" font-family="Arial,sans-serif" font-size="7" font-weight="700">Target</text>
+  <line x1="330" y1="135" x2="570" y2="135" stroke="#C8D9E8" stroke-width="1"/>
+  <text x="338" y="146" fill="#555555" font-family="Arial,sans-serif" font-size="7">10.0.0.0/16</text>
+  <text x="468" y="146" fill="#145A32" font-family="Arial,sans-serif" font-size="7">local</text>
+  <text x="338" y="158" fill="#555555" font-family="Arial,sans-serif" font-size="7">0.0.0.0/0</text>
+  <text x="468" y="158" fill="#2E86C1" font-family="Arial,sans-serif" font-size="7">igw-xxxxxxxx</text>
+  <text x="338" y="170" fill="#555555" font-family="Arial,sans-serif" font-size="7">prefix: S3</text>
+  <text x="468" y="170" fill="#784212" font-family="Arial,sans-serif" font-size="7">vpce-s3 (Gateway EP)</text>
+  <text x="338" y="182" fill="#555555" font-family="Arial,sans-serif" font-size="7">prefix: DynamoDB</text>
+  <text x="468" y="182" fill="#784212" font-family="Arial,sans-serif" font-size="7">vpce-ddb (Gateway EP)</text>
+  <text x="338" y="192" fill="#767676" font-family="Arial,sans-serif" font-size="6.5">Note: NAT GW itself uses this route to reach internet via IGW</text>
+
+  <!-- NAT GATEWAY — KEY ELEMENT -->
+  <rect x="590" y="100" width="230" height="110" rx="7" fill="#FFFBF0" stroke="#FF9900" stroke-width="3"/>
+  <rect x="598" y="94" width="110" height="13" fill="#F2FAF5"/>
+  <text x="653" y="104" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="8.5" font-weight="700">NAT Gateway</text>
+  <text x="705" y="122" text-anchor="middle" fill="#d97706" font-family="Arial,sans-serif" font-size="13" font-weight="900">⇌</text>
+  <text x="705" y="140" text-anchor="middle" fill="#d97706" font-family="Arial,sans-serif" font-size="10" font-weight="700">NAT Gateway</text>
+  <text x="705" y="154" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7.5">img-analyzer-{env}-nat</text>
+  <rect x="598" y="162" width="214" height="18" rx="3" fill="#FFF8F0" stroke="#FF9900" stroke-width="1"/>
+  <text x="705" y="174" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="7.5" font-weight="700">Elastic IP (EIP)  —  static public IP</text>
+  <text x="705" y="196" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Replaces 3 VPC Interface Endpoints</text>
+
+  <!-- Gateway Endpoints (public subnet) -->
+  <rect x="324" y="212" width="120" height="52" rx="5" fill="#FFF8F0" stroke="#FF9900" stroke-width="1"/>
+  <text x="384" y="228" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="8" font-weight="700">S3 Gateway EP</text>
+  <text x="384" y="240" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Type: Gateway (free)</text>
+  <text x="384" y="252" text-anchor="middle" fill="#145A32" font-family="Arial,sans-serif" font-size="7">AWS backbone — no NAT cost</text>
+  <text x="384" y="260" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="6.5">CVE + SBOM report uploads</text>
+
+  <rect x="456" y="212" width="128" height="52" rx="5" fill="#FFF8F0" stroke="#FF9900" stroke-width="1"/>
+  <text x="520" y="228" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="8" font-weight="700">DynamoDB Gateway EP</text>
+  <text x="520" y="240" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Type: Gateway (free)</text>
+  <text x="520" y="252" text-anchor="middle" fill="#145A32" font-family="Arial,sans-serif" font-size="7">AWS backbone — no NAT cost</text>
+  <text x="520" y="260" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="6.5">Scan results + status writes</text>
+
+  <!-- IGW → NAT GW arrows inside VPC -->
+  <line x1="820" y1="310" x2="820" y2="225" stroke="#d97706" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#mAmber)"/>
+  <line x1="298" y1="310" x2="590" y2="165" stroke="#d97706" stroke-width="1.5" marker-end="url(#mAmber)"/>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       PRIVATE SUBNET  x=312-938, y=365-630
+  ════════════════════════════════════════════════════════════ -->
+  <rect x="312" y="365" width="626" height="265" rx="8" fill="#EEF6FB" stroke="#2E86C1" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <rect x="320" y="360" width="234" height="12" fill="#EEF6FB"/>
+  <text x="437" y="370" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="9" font-weight="700">Private Subnet: 10.0.20.0/24  ·  us-east-1a</text>
+
+  <!-- Private Route Table -->
+  <rect x="324" y="376" width="250" height="54" rx="5" fill="#EAF5FB" stroke="#2E86C1" stroke-width="1"/>
+  <text x="449" y="389" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="8" font-weight="700">Private Route Table</text>
+  <line x1="330" y1="393" x2="568" y2="393" stroke="#C8D9E8" stroke-width="1"/>
+  <text x="338" y="404" fill="#555555" font-family="Arial,sans-serif" font-size="7">10.0.0.0/16</text>
+  <text x="430" y="404" fill="#145A32" font-family="Arial,sans-serif" font-size="7">local</text>
+  <text x="338" y="416" fill="#555555" font-family="Arial,sans-serif" font-size="7">0.0.0.0/0</text>
+  <text x="430" y="416" fill="#d97706" font-family="Arial,sans-serif" font-size="7">nat-xxxxxxxx (NAT Gateway)</text>
+  <text x="338" y="426" fill="#555555" font-family="Arial,sans-serif" font-size="6.5">prefix: S3 / DDB</text>
+  <text x="430" y="426" fill="#784212" font-family="Arial,sans-serif" font-size="6.5">vpce-s3 / vpce-ddb (Gateway EPs)</text>
+
+  <!-- ECS Fargate Task box -->
+  <rect x="324" y="440" width="368" height="178" rx="8" fill="#F2FAF5" stroke="#1a7f37" stroke-width="2"/>
+  <rect x="344" y="456" width="20" height="16" rx="2" fill="none" stroke="#1a7f37" stroke-width="1.5"/>
+  <rect x="348" y="449" width="20" height="16" rx="2" fill="none" stroke="#145A32" stroke-width="1.5"/>
+  <text x="500" y="462" text-anchor="middle" fill="#145A32" font-family="Arial,sans-serif" font-size="12" font-weight="700">ECS Fargate Task</text>
+  <text x="500" y="476" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="8">Scanner (Trivy + Syft)  ·  Python 3.12</text>
+  <text x="500" y="488" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">img-analyzer-{env}-scanner  ·  ECR private image</text>
+  <line x1="330" y1="494" x2="686" y2="494" stroke="#C0D8C0" stroke-width="1"/>
+
+  <!-- assignPublicIp callout -->
+  <rect x="336" y="500" width="348" height="26" rx="4" fill="#EAFAEE" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="510" y="513" text-anchor="middle" fill="#145A32" font-family="Arial,sans-serif" font-size="9" font-weight="700">assignPublicIp = DISABLED  ·  No public IP assigned</text>
+  <text x="510" y="523" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Outbound internet via NAT Gateway  —  inbound: none</text>
+
+  <!-- Security Group inside Fargate box -->
+  <rect x="336" y="532" width="348" height="76" rx="5" fill="#FDF4F4" stroke="#C0392B" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <rect x="344" y="527" width="130" height="11" fill="#F2FAF5"/>
+  <text x="409" y="536" text-anchor="middle" fill="#C0392B" font-family="Arial,sans-serif" font-size="8" font-weight="700">Security Group: fargate-task-sg</text>
+  <text x="344" y="550" fill="#555555" font-family="Arial,sans-serif" font-size="7.5" font-weight="700">Inbound:</text>
+  <rect x="344" y="553" width="332" height="14" rx="2" fill="#FDEBD0"/>
+  <text x="510" y="563" text-anchor="middle" fill="#922B21" font-family="Arial,sans-serif" font-size="7.5" font-weight="700">No inbound rules — scanner tasks are never reached inbound</text>
+  <text x="344" y="580" fill="#555555" font-family="Arial,sans-serif" font-size="7.5" font-weight="700">Outbound:</text>
+  <text x="430" y="580" fill="#555555" font-family="Arial,sans-serif" font-size="7">TCP 443  →  0.0.0.0/0  (HTTPS to internet via NAT GW)</text>
+  <text x="344" y="594" fill="#767676" font-family="Arial,sans-serif" font-size="6.5">vCPU: 0.5 (256 units)  ·  Memory: 512 MB dev / 1 GB prod  ·  Launched by EventBridge Pipe</text>
+
+  <!-- ECS Task Config (right side of private subnet) -->
+  <rect x="702" y="376" width="224" height="242" rx="6" fill="#F2FAF5" stroke="#1a7f37" stroke-width="1"/>
+  <rect x="710" y="371" width="148" height="12" fill="#EEF6FB"/>
+  <text x="784" y="381" text-anchor="middle" fill="#145A32" font-family="Arial,sans-serif" font-size="8" font-weight="700">ECS Task Configuration</text>
+
+  <text x="710" y="398" fill="#555555" font-family="Arial,sans-serif" font-size="7.5" font-weight="700">Task Definition</text>
+  <line x1="708" y1="402" x2="920" y2="402" stroke="#C0D8C0" stroke-width="1"/>
+  <text x="710" y="413" fill="#555555" font-family="Arial,sans-serif" font-size="7">Cluster:   img-analyzer-{env}-phase2</text>
+  <text x="710" y="424" fill="#555555" font-family="Arial,sans-serif" font-size="7">Family:    img-analyzer-{env}-scanner</text>
+  <text x="710" y="435" fill="#555555" font-family="Arial,sans-serif" font-size="7">Launch:    FARGATE</text>
+  <text x="710" y="446" fill="#555555" font-family="Arial,sans-serif" font-size="7">Network:   awsvpc  (private subnet)</text>
+  <text x="710" y="457" fill="#555555" font-family="Arial,sans-serif" font-size="7">PublicIP:  DISABLED</text>
+
+  <line x1="708" y1="463" x2="920" y2="463" stroke="#C0D8C0" stroke-width="1"/>
+  <text x="710" y="475" fill="#555555" font-family="Arial,sans-serif" font-size="7.5" font-weight="700">IAM — Task Role</text>
+  <text x="710" y="486" fill="#555555" font-family="Arial,sans-serif" font-size="7">· s3:PutObject → reports buckets</text>
+  <text x="710" y="497" fill="#555555" font-family="Arial,sans-serif" font-size="7">· dynamodb:PutItem → scans-v2</text>
+  <text x="710" y="508" fill="#555555" font-family="Arial,sans-serif" font-size="7">· ecr:GetAuthorizationToken (*)</text>
+  <text x="710" y="519" fill="#555555" font-family="Arial,sans-serif" font-size="7">· ecr:BatchGetImage → scanner repo</text>
+
+  <line x1="708" y1="525" x2="920" y2="525" stroke="#C0D8C0" stroke-width="1"/>
+  <text x="710" y="537" fill="#555555" font-family="Arial,sans-serif" font-size="7.5" font-weight="700">Trigger: EventBridge Pipe</text>
+  <text x="710" y="548" fill="#555555" font-family="Arial,sans-serif" font-size="7">Source:  SQS scan-queue (batch=1)</text>
+  <text x="710" y="559" fill="#555555" font-family="Arial,sans-serif" font-size="7">Target:  ecs:RunTask (1:1 per msg)</text>
+  <text x="710" y="570" fill="#555555" font-family="Arial,sans-serif" font-size="7">Env:     SQS_MESSAGE → container</text>
+  <text x="710" y="581" fill="#145A32" font-family="Arial,sans-serif" font-size="7">1 SQS msg → 1 Fargate task</text>
+  <text x="710" y="592" fill="#767676" font-family="Arial,sans-serif" font-size="6.5">EventBridge Pipe manages SQS poll</text>
+  <text x="710" y="602" fill="#767676" font-family="Arial,sans-serif" font-size="6.5">+ delete. Fargate reads msg from env.</text>
+  <text x="710" y="612" fill="#767676" font-family="Arial,sans-serif" font-size="6.5">Visibility timeout: 360s</text>
+
+  <!-- Fargate → NAT GW arrow (private → public subnet) -->
+  <line x1="510" y1="440" x2="700" y2="218" stroke="#d97706" stroke-width="2" marker-end="url(#mAmber)"/>
+  <text x="574" y="318" text-anchor="middle" fill="#d97706" font-family="Arial,sans-serif" font-size="7.5" font-weight="700" transform="rotate(-52,574,318)">via NAT GW</text>
+
+  <!-- Fargate → S3 EP arrow -->
+  <line x1="430" y1="440" x2="384" y2="264" stroke="#FF9900" stroke-width="1.5" stroke-dasharray="4,2" marker-end="url(#mOrange)"/>
+
+  <!-- Fargate → DDB EP arrow -->
+  <line x1="490" y1="440" x2="520" y2="264" stroke="#FF9900" stroke-width="1.5" stroke-dasharray="4,2" marker-end="url(#mOrange)"/>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       AWS REGIONAL SERVICES  x=962-1186, y=75-638
+  ════════════════════════════════════════════════════════════ -->
+  <rect x="962" y="75" width="224" height="563" rx="8" fill="#FFF8F0" stroke="#FF9900" stroke-width="1" stroke-dasharray="4,3"/>
+  <rect x="970" y="70" width="122" height="13" fill="#FFF8F0"/>
+  <text x="1031" y="80" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="9" font-weight="700">AWS Regional Services</text>
+
+  <!-- ECR -->
+  <rect x="972" y="92" width="204" height="56" rx="5" fill="#FFF8F0" stroke="#FF9900" stroke-width="1.5"/>
+  <text x="1074" y="108" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="9" font-weight="700">Amazon ECR</text>
+  <text x="1074" y="120" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">img-analyzer-{env}-scanner</text>
+  <text x="1074" y="131" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Immutable tags · scan on push</text>
+  <text x="1074" y="141" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Pulled via NAT GW → IGW</text>
+
+  <!-- SQS -->
+  <rect x="972" y="160" width="204" height="66" rx="5" fill="#F2FAF5" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="1074" y="176" text-anchor="middle" fill="#145A32" font-family="Arial,sans-serif" font-size="9" font-weight="700">Amazon SQS</text>
+  <text x="1074" y="189" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">img-analyzer-{env}-scan-queue</text>
+  <text x="1074" y="201" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">img-analyzer-{env}-scan-dlq</text>
+  <text x="1074" y="213" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Polled by EventBridge Pipe</text>
+  <text x="1074" y="221" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="6.5">Visibility timeout: 360s</text>
+
+  <!-- DynamoDB v2 -->
+  <rect x="972" y="238" width="204" height="56" rx="5" fill="#FFF8F0" stroke="#FF9900" stroke-width="1.5"/>
+  <text x="1074" y="254" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="9" font-weight="700">DynamoDB v2</text>
+  <text x="1074" y="266" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">img-analyzer-{env}-scans-v2</text>
+  <text x="1074" y="278" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Reached via Gateway Endpoint</text>
+  <text x="1074" y="289" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="7">→ stays on AWS backbone</text>
+
+  <!-- S3 -->
+  <rect x="972" y="306" width="204" height="56" rx="5" fill="#FFF8F0" stroke="#FF9900" stroke-width="1.5"/>
+  <text x="1074" y="322" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="9" font-weight="700">Amazon S3</text>
+  <text x="1074" y="334" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">CVE reports + SBOM buckets</text>
+  <text x="1074" y="346" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Reached via Gateway Endpoint</text>
+  <text x="1074" y="357" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="7">→ stays on AWS backbone</text>
+
+  <!-- CloudWatch Logs -->
+  <rect x="972" y="374" width="204" height="56" rx="5" fill="#EAF5FB" stroke="#2E86C1" stroke-width="1"/>
+  <text x="1074" y="390" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="9" font-weight="700">CloudWatch Logs</text>
+  <text x="1074" y="403" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">/ecs/img-analyzer-{env}-scanner</text>
+  <text x="1074" y="415" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Log streaming via NAT GW</text>
+  <text x="1074" y="424" text-anchor="middle" fill="#767676" font-family="Arial,sans-serif" font-size="6.5">awslogs driver → auto-create stream</text>
+
+  <!-- EventBridge Pipe -->
+  <rect x="972" y="442" width="204" height="56" rx="5" fill="#F5EEFF" stroke="#8C4FFF" stroke-width="1.5"/>
+  <text x="1074" y="458" text-anchor="middle" fill="#4a235a" font-family="Arial,sans-serif" font-size="9" font-weight="700">EventBridge Pipe</text>
+  <text x="1074" y="471" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">img-analyzer-{env}-scan-trigger</text>
+  <text x="1074" y="483" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">SQS → ECS RunTask (1:1)</text>
+  <text x="1074" y="492" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="6.5">Injects SQS_MESSAGE as env var</text>
+
+  <!-- Cognito -->
+  <rect x="972" y="510" width="204" height="56" rx="5" fill="#EAF5FB" stroke="#2E86C1" stroke-width="1"/>
+  <text x="1074" y="526" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="9" font-weight="700">Amazon Cognito</text>
+  <text x="1074" y="539" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">JWT authorizer (API GW managed)</text>
+  <text x="1074" y="551" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Token validated by API Gateway</text>
+  <text x="1074" y="561" text-anchor="middle" fill="#555555" font-family="Arial,sans-serif" font-size="7">Free up to 50K MAUs</text>
+
+  <!-- VPC → Regional arrows -->
+  <line x1="950" y1="120" x2="972" y2="120" stroke="#FF9900" stroke-width="1.5" marker-end="url(#mOrange)"/>
+  <text x="961" y="115" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="6">NAT</text>
+  <line x1="950" y1="193" x2="972" y2="193" stroke="#1a7f37" stroke-width="1.5" marker-end="url(#mGreen)"/>
+  <text x="961" y="188" text-anchor="middle" fill="#145A32" font-family="Arial,sans-serif" font-size="6">Pipe</text>
+  <line x1="950" y1="266" x2="972" y2="266" stroke="#FF9900" stroke-width="1.5" marker-end="url(#mOrange)"/>
+  <text x="961" y="261" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="6">GW EP</text>
+  <line x1="950" y1="334" x2="972" y2="334" stroke="#FF9900" stroke-width="1.5" marker-end="url(#mOrange)"/>
+  <text x="961" y="329" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="6">GW EP</text>
+  <line x1="950" y1="402" x2="972" y2="402" stroke="#2E86C1" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#mMuted)"/>
+  <text x="961" y="397" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="6">NAT</text>
+  <line x1="950" y1="470" x2="972" y2="470" stroke="#8C4FFF" stroke-width="1.5" marker-end="url(#mPurple)"/>
+
+  <!-- VPC right boundary divider -->
+  <line x1="952" y1="80" x2="952" y2="632" stroke="#D0D0D0" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       FOOTER  y=648-720
+  ════════════════════════════════════════════════════════════ -->
+  <line x1="20" y1="648" x2="1180" y2="648" stroke="#D0D0D0" stroke-width="1.5"/>
+
+  <!-- Traffic Flow box -->
+  <rect x="14" y="656" width="590" height="56" rx="5" fill="#EAF5FB" stroke="#2E86C1" stroke-width="1"/>
+  <text x="307" y="670" text-anchor="middle" fill="#1a5276" font-family="Arial,sans-serif" font-size="8" font-weight="700">Outbound Traffic Flow (Fargate → Internet via NAT GW)</text>
+  <text x="22" y="683" fill="#555555" font-family="Arial,sans-serif" font-size="7">Fargate → NAT GW → IGW → Docker Hub  (Trivy scans target image  ←  KEY new capability)</text>
+  <text x="22" y="694" fill="#555555" font-family="Arial,sans-serif" font-size="7">Fargate → NAT GW → IGW → ECR  (scanner image pull on task start)  ·  CloudWatch Logs (log streaming)</text>
+  <text x="22" y="705" fill="#784212" font-family="Arial,sans-serif" font-size="7">Fargate → S3 Gateway EP  (AWS backbone · free · no NAT cost)  ·  DynamoDB Gateway EP  (same)</text>
+
+  <!-- Cost comparison box -->
+  <rect x="616" y="656" width="570" height="56" rx="5" fill="#FFF8F0" stroke="#FF9900" stroke-width="1.5"/>
+  <text x="901" y="670" text-anchor="middle" fill="#784212" font-family="Arial,sans-serif" font-size="8" font-weight="700">Cost — NAT Gateway vs VPC Interface Endpoints</text>
+  <text x="624" y="683" fill="#555555" font-family="Arial,sans-serif" font-size="7">Before:  3 × VPC Interface Endpoints (CW Logs + ECR API + ECR DKR, dev+prod)  =  $43.80/month</text>
+  <text x="624" y="694" fill="#555555" font-family="Arial,sans-serif" font-size="7">After:   1 × NAT Gateway + Elastic IP (dev+prod)                               =  ~$32/month</text>
+  <text x="624" y="705" fill="#145A32" font-family="Arial,sans-serif" font-size="7" font-weight="700">Saves ~$12/month AND enables full internet access  →  Docker Hub image scanning now works</text>
+
+  <text x="600" y="719" text-anchor="middle" fill="#767676" font-family="Arial,sans-serif" font-size="9">DocImgAnalizer · Phase 2 Network Topology (NAT Gateway)  ·  AWS us-east-1  ·  craftingnewtech.com</text>
+</svg>
