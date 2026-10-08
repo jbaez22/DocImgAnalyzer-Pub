@@ -50,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -139,7 +139,7 @@ jobs:
           echo "api_endpoint=$(echo "$OUTPUTS"     | jq -r '.api_endpoint.value')"              >> $GITHUB_OUTPUT
 
       # -- Lambda deployment ------------------------------------------------
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -304,7 +304,7 @@ jobs:
           echo "api_endpoint=$(echo "$OUTPUTS"     | jq -r '.api_endpoint.value')"              >> $GITHUB_OUTPUT
 
       # -- Lambda deployment ------------------------------------------------
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 

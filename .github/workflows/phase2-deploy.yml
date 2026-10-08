@@ -49,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -185,7 +185,7 @@ jobs:
             --target-parameters "$NEW_TARGET" --region us-east-1 --query 'Arn' --output text
 
       # ── Deploy Lambda v2 ─────────────────────────────────────────────────
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Lambda v2 package
@@ -337,7 +337,7 @@ jobs:
       # committed and the function's *configuration* updated via Terraform,
       # but the deployed *code* remained stale indefinitely since nothing
       # ever called update-function-code for prod.
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Lambda v2 package (prod)

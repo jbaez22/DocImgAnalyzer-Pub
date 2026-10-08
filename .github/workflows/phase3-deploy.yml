@@ -58,7 +58,7 @@ jobs:
         run: terraform apply -var-file=environments/dev/terraform.tfvars -auto-approve
 
       # ── Build + deploy Lambda v3 ─────────────────────────────────────────
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -207,7 +207,7 @@ jobs:
         working-directory: terraform/phase3
         run: terraform apply -var-file=environments/prod/terraform.tfvars -auto-approve
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
