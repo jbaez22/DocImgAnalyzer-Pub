@@ -148,7 +148,7 @@ jobs:
           echo "enterprise=$(terraform output -raw stripe_enterprise_price_id)" >> $GITHUB_OUTPUT
 
       # ── Deploy frontend ──────────────────────────────────────────────────
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -288,7 +288,7 @@ jobs:
           echo "pro=$(terraform output -raw stripe_pro_price_id)" >> $GITHUB_OUTPUT
           echo "enterprise=$(terraform output -raw stripe_enterprise_price_id)" >> $GITHUB_OUTPUT
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm

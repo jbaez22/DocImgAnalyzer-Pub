@@ -66,7 +66,7 @@ jobs:
           cd backend
           pytest tests/ -v --tb=short
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -207,7 +207,7 @@ jobs:
             --zip-file fileb://lambda-v2.zip
 
       # ── Deploy frontend ──────────────────────────────────────────────────
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -359,7 +359,7 @@ jobs:
             --zip-file fileb://lambda-v2.zip
 
       # ── Deploy frontend (prod) ───────────────────────────────────────────
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
